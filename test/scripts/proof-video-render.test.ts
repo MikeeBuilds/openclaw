@@ -3,7 +3,7 @@ import {
   planProofVideoRender,
   type ProofVideoCue,
   type ProofVideoCues,
-} from "./proof-video-render.js";
+} from "../../scripts/lib/proof-video-render.ts";
 
 const document = (cues: ProofVideoCue[]): ProofVideoCues => ({
   version: 1,

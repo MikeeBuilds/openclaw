@@ -376,17 +376,14 @@ registerHooks({resolve(specifier, context, nextResolve) {
     ).toEqual([argv]);
   });
 
-  it.each(["test/scripts/run-vitest.test.ts", "scripts/lib/proof-video-render.test.ts"])(
-    "routes explicit tooling test %s through the tooling config",
-    (file) => {
-      expect(resolveImplicitVitestArgs(["run", file])).toEqual([
-        "run",
-        "--config",
-        "test/vitest/vitest.tooling.config.ts",
-        file,
-      ]);
-    },
-  );
+  it("routes explicit tooling tests through the tooling config", () => {
+    expect(resolveImplicitVitestArgs(["run", "test/scripts/run-vitest.test.ts"])).toEqual([
+      "run",
+      "--config",
+      "test/vitest/vitest.tooling.config.ts",
+      "test/scripts/run-vitest.test.ts",
+    ]);
+  });
 
   it("routes explicit Docker helper tests through the Docker tooling config", () => {
     expect(resolveImplicitVitestArgs(["run", "test/scripts/docker-build-helper.test.ts"])).toEqual([

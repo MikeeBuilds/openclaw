@@ -150,11 +150,6 @@ describe("test-projects args", () => {
       config: "test/vitest/vitest.tooling.config.ts",
     },
     {
-      title: "routes colocated script tests to the tooling config",
-      target: "scripts/lib/proof-video-render.test.ts",
-      config: "test/vitest/vitest.tooling.config.ts",
-    },
-    {
       title: "keeps native artifact fixtures in the serial tooling owner",
       target: "test/scripts/mac-elevation-artifact.test.ts",
       config: "test/vitest/vitest.tooling.config.ts",

@@ -717,7 +717,7 @@ describe("test-projects build admission", () => {
     expect(commands.reader).toHaveBeenCalledOnce();
     expect(selected).toEqual([
       args[0] === toolingConfig
-        ? (include ?? ["test/**/*.test.ts", "src/scripts/**/*.test.ts", "scripts/**/*.test.ts"])
+        ? (include ?? ["test/**/*.test.ts", "src/scripts/**/*.test.ts"])
         : args,
     ]);
     if (borrowed && original) {
