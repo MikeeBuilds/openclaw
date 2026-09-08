@@ -404,6 +404,7 @@ const TEST_HOST_CAPABILITIES: SideQuestionParams["hostCapabilities"] = Object.fr
   version: 1,
   assertActive: () => {},
   bindToolSurface: (tools) => tools,
+  createToolSurface: (options) => createOpenClawCodingToolsMock(options),
   runBeforeToolCall: async (request) => ({ blocked: false, params: request.params }),
   requestApproval: async () => undefined,
   waitForApproval: async () => undefined,
@@ -3288,6 +3289,8 @@ describe("runCodexAppServerSideQuestion", () => {
         hostCapabilities: {
           ...TEST_HOST_CAPABILITIES,
           bindToolSurface: bindToolSurface as never,
+          createToolSurface: (options, bindingOptions) =>
+            bindToolSurface(createOpenClawCodingToolsMock(options), bindingOptions) as never,
         },
       }),
     );
@@ -3337,6 +3340,8 @@ describe("runCodexAppServerSideQuestion", () => {
           hostCapabilities: {
             ...TEST_HOST_CAPABILITIES,
             bindToolSurface: bindToolSurface as never,
+            createToolSurface: (options, bindingOptions) =>
+              bindToolSurface(createOpenClawCodingToolsMock(options), bindingOptions) as never,
           },
         }),
       ),
