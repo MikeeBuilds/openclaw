@@ -17,6 +17,7 @@ import {
 import {
   defaultExecAutoReviewer,
   EXEC_AUTO_REVIEW_SHELL_STARTUP_WARNING,
+  formatExecAutoReviewAssessment,
   resolveExecAutoReviewDecision,
 } from "../infra/exec-auto-review.js";
 import {
@@ -407,7 +408,7 @@ export async function executeNodeHostCommand(
       if (!inlineApprovedByAsk) {
         autoReviewRequiresHumanApproval = true;
         params.warnings.push(
-          `Exec auto-review deferred to human approval (risk=${decision.risk}): ${decision.rationale}`,
+          `Exec auto-review deferred to human approval (${formatExecAutoReviewAssessment(decision)}): ${decision.rationale}`,
         );
       }
     }

@@ -12,23 +12,42 @@ export type ExecAutoReviewDecision =
       decision: "allow-once";
       rationale: string;
       risk: "low" | "medium";
+      userAuthorization?: ExecAutoReviewRisk;
     }
   | {
       decision: "deny";
       rationale: string;
       risk: ExecAutoReviewRisk;
+      userAuthorization?: ExecAutoReviewRisk;
     }
   | {
       decision: "ask";
       rationale: string;
       risk: ExecAutoReviewRisk;
+      userAuthorization?: ExecAutoReviewRisk;
     };
 
 /** Execution host whose command policy context is being reviewed. */
 export type ExecAutoReviewHost = "gateway" | "node" | "codex-app-server";
 
+export type ExecAutoReviewTranscriptEntry = {
+  kind: "user" | "assistant" | "tool_call" | "tool_result";
+  text: string;
+  toolName?: string;
+  toolCallId?: string;
+  origin?: "operator" | "channel" | "inter_session" | "internal_system" | "unknown";
+  truncated?: boolean;
+};
+
+export type ExecAutoReviewTranscript = {
+  entries: readonly ExecAutoReviewTranscriptEntry[];
+  omittedEntries: number;
+  truncated: boolean;
+};
+
 /** Command and policy facts supplied to an exec auto-reviewer. */
 export type ExecAutoReviewInput = {
+  transcript?: ExecAutoReviewTranscript;
   command: string;
   argv?: readonly string[];
   resolvedPath?: string | null;
@@ -74,6 +93,10 @@ export const EXEC_AUTO_REVIEW_DENIAL_GUIDANCE =
 
 export const EXEC_AUTO_REVIEW_SHELL_STARTUP_WARNING =
   "Exec auto-review skipped: login or interactive shell startup requires human approval";
+
+export function formatExecAutoReviewAssessment(decision: ExecAutoReviewDecision): string {
+  return `risk=${decision.risk}${decision.userAuthorization ? `, authorization=${decision.userAuthorization}` : ""}`;
+}
 
 /** Keeps reviewer and provider explanations safe for human-facing approval text. */
 export function normalizeExecAutoReviewRationale(value: unknown, fallback: string): string {

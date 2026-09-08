@@ -34,6 +34,7 @@ import type { ExecAuthorizationPlan } from "../infra/exec-authorization-plan.js"
 import {
   EXEC_AUTO_REVIEW_DENIAL_GUIDANCE,
   EXEC_AUTO_REVIEW_SHELL_STARTUP_WARNING,
+  formatExecAutoReviewAssessment,
   resolveExecAutoReviewDecision,
   type ExecAutoReviewer,
 } from "../infra/exec-auto-review.js";
@@ -766,7 +767,7 @@ async function evaluateSystemRunPolicyPhase(
         case "deny":
           await sendSystemRunDenied(opts, parsed.execution, {
             reason: "auto-review-denied",
-            message: `SYSTEM_RUN_DENIED: auto-review denied (risk=${decision.risk}): ${decision.rationale}\n${EXEC_AUTO_REVIEW_DENIAL_GUIDANCE}`,
+            message: `SYSTEM_RUN_DENIED: auto-review denied (${formatExecAutoReviewAssessment(decision)}): ${decision.rationale}\n${EXEC_AUTO_REVIEW_DENIAL_GUIDANCE}`,
           });
           return null;
         case "ask":
