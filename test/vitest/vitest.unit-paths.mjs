@@ -3,6 +3,7 @@ import path from "node:path";
 import { BUNDLED_PLUGIN_ROOT_DIR } from "../../scripts/lib/bundled-plugin-paths.mjs";
 
 export const unitTestIncludePatterns = [
+  "scripts/lib/proof-video-render.test.ts",
   "src/**/*.test.ts",
   "packages/**/*.test.ts",
   "test/**/*.test.ts",
