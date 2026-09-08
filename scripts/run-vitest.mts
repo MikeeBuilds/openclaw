@@ -546,7 +546,9 @@ function withImplicitVitestConfig(argv: string[], config: string): string[] {
 
 function isToolingTestTarget(target: string): boolean {
   return (
-    target.startsWith("test/") && target.endsWith(".test.ts") && !TOOLING_EXCLUDED_TESTS.has(target)
+    ["test/", "src/scripts/", "scripts/"].some((prefix) => target.startsWith(prefix)) &&
+    target.endsWith(".test.ts") &&
+    !TOOLING_EXCLUDED_TESTS.has(target)
   );
 }
 

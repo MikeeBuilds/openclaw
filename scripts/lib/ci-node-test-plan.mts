@@ -2249,7 +2249,11 @@ function listCompactToolingTestFiles(): string[] {
     TOOLING_DOCKER_TEST_FILE,
     ...toolingIsolatedTestFiles,
   ]);
-  return [...listTestFiles("test"), ...listTestFiles("src/scripts")].filter(
+  return [
+    ...listTestFiles("test"),
+    ...listTestFiles("src/scripts"),
+    ...listTestFiles("scripts"),
+  ].filter(
     (file) =>
       !file.startsWith("test/fixtures/") &&
       !file.endsWith(".e2e.test.ts") &&

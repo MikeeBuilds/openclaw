@@ -998,8 +998,8 @@ function listToolingFullSuiteTestTargets(cwd: string) {
   // The CLI plans against one process-stable checkout. Reuse its inventory when
   // callers compare full-suite modes instead of walking the tree for every mode.
   cachedToolingFullSuiteTestTargets = uniqueOrdered(
-    [path.join(cwd, "test"), path.join(cwd, "src", "scripts")].flatMap((root) =>
-      fs.existsSync(root) ? listRepoFilesRecursive(root, cwd) : [],
+    [path.join(cwd, "test"), path.join(cwd, "src", "scripts"), path.join(cwd, "scripts")].flatMap(
+      (root) => (fs.existsSync(root) ? listRepoFilesRecursive(root, cwd) : []),
     ),
   )
     // Explicit leaf targets bypass the config's live-test exclusion and produce an empty shard.
@@ -3554,6 +3554,7 @@ function classifyTarget(arg: string, cwd: string) {
   }
   if (
     relative.startsWith("test/") ||
+    isPathAtOrUnder(relative, "scripts") ||
     relative === "src/scripts" ||
     relative.startsWith("src/scripts/") ||
     relative === "src/config/doc-baseline.integration.test.ts" ||
