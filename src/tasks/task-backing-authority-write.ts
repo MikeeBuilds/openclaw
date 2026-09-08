@@ -1,25 +1,28 @@
+import { inspectDefaultSubagentTaskBacking } from "./detached-task-runtime.js";
 import { isProvisionalSubagentKillTask } from "./task-cancellation-state.js";
-import { getTaskFlowById } from "./task-flow-runtime-internal.js";
 import { cloneTaskRecord } from "./task-registry-records.js";
-import { getTasksByRunScope } from "./task-registry-state.js";
 import type { JsonValue, TaskRecord, TaskRuntime } from "./task-registry.types.js";
 
 type CanonicalTaskBacking = {
   runtime: TaskRuntime;
+  ownerKey: string;
   childSessionKey: string;
   runId: string;
+  generation: number | undefined;
   detail: JsonValue;
 };
 
 function findCanonicalTaskBacking(params: CanonicalTaskBacking): TaskRecord | undefined {
-  return getTasksByRunScope({
+  const backing = inspectDefaultSubagentTaskBacking({
     runId: params.runId,
-    runtime: params.runtime,
+    ownerKey: params.ownerKey,
     sessionKey: params.childSessionKey,
-  }).find((candidate) => {
-    const flowId = candidate.parentFlowId?.trim();
-    return flowId && getTaskFlowById(flowId)?.syncMode === "task_mirrored";
+    generation: params.generation,
+    policy: "failure-finalization",
   });
+  return backing.kind === "valid" && backing.task.runtime === params.runtime
+    ? backing.task
+    : undefined;
 }
 
 export type PreparedCanonicalTaskActivation = {
@@ -50,7 +53,8 @@ export function prepareCanonicalTaskActivation(
   next.status = "running";
   next.startedAt = current.startedAt ?? params.startedAt;
   next.lastEventAt = params.startedAt;
-  next.deliveryStatus = "pending";
+  // Silent collectors never enter the delivery queue when their owner generation changes.
+  next.deliveryStatus = current.deliveryStatus === "not_applicable" ? "not_applicable" : "pending";
   delete next.endedAt;
   delete next.cleanupAfter;
   delete next.error;

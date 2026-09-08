@@ -14,6 +14,7 @@ import {
   bindGatewayContextResolver,
   getGatewayContextResolver,
 } from "../../../plugins/runtime/gateway-request-scope.js";
+import { isDefaultDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
 import { prepareCanonicalTaskActivation } from "../../../tasks/task-backing-authority-write.js";
 import { createSubagentTaskBackingDetail } from "../../../tasks/task-backing-authority.js";
 import { removeInternalSessionEffectsSession } from "../../internal-session-effects.js";
@@ -204,6 +205,7 @@ export class SubagentRecoveryManager extends SubagentWaitManager {
       killReconciliation: undefined,
       killIntent: undefined,
       suppressCompletionDelivery: undefined,
+      taskTerminalProjection: undefined,
       delivery: {
         status: source.expectsCompletionMessage === false ? "not_required" : "pending",
       },
@@ -217,21 +219,24 @@ export class SubagentRecoveryManager extends SubagentWaitManager {
     );
     clearDeliveryState(next);
 
-    const taskActivation =
-      source.expectsCompletionMessage === false
-        ? undefined
-        : prepareCanonicalTaskActivation({
-            runtime: "subagent",
-            childSessionKey: next.childSessionKey,
-            runId: source.taskRunId ?? source.runId,
-            detail: createSubagentTaskBackingDetail(generation),
-            startedAt: now,
-            // An admitted kill owns the provisional task projection until its
-            // reconciliation settles. An unclaimed marker yields to the admitted
-            // successor and must not leave its task cancelled.
-            preserveProvisionalCancellation:
-              source.killReconciliation?.taskCancellationAccepted === true,
-          });
+    // Every default-runtime registration with a canonical backing transfers its
+    // generation here; announcement and collector policy do not define task ownership.
+    const taskActivation = isDefaultDetachedTaskLifecycleRuntime()
+      ? prepareCanonicalTaskActivation({
+          runtime: "subagent",
+          ownerKey: source.requesterSessionKey,
+          childSessionKey: next.childSessionKey,
+          runId: source.taskRunId ?? source.runId,
+          generation: source.generation,
+          detail: createSubagentTaskBackingDetail(generation),
+          startedAt: now,
+          // An admitted kill owns the provisional task projection until its
+          // reconciliation settles. An unclaimed marker yields to the admitted
+          // successor and must not leave its task cancelled.
+          preserveProvisionalCancellation:
+            source.killReconciliation?.taskCancellationAccepted === true,
+        })
+      : undefined;
 
     if (previousRunId !== nextRunId) {
       this.options.runs.delete(previousRunId);

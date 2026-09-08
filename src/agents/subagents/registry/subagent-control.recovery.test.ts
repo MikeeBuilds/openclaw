@@ -26,6 +26,7 @@ import {
 import { bindGatewayContextResolver } from "../../../plugins/runtime/gateway-request-scope.js";
 import * as gatewayWorkAdmission from "../../../process/gateway-work-admission.js";
 import * as sessionLifecycle from "../../../sessions/session-lifecycle-admission.js";
+import { openOpenClawStateDatabase } from "../../../state/openclaw-state-db.js";
 import { SUBAGENT_KILL_TASK_ERROR } from "../../../tasks/detached-task-runtime-contract.js";
 import { getDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.js";
 import { setDetachedTaskLifecycleRuntime } from "../../../tasks/detached-task-runtime.test-support.js";
@@ -394,6 +395,19 @@ it.each(
       });
       const successorTask = findTaskByRunId(successor.taskRunId ?? successor.runId)!;
       expect(successorTask?.status).toBe("running");
+      if (b.collect) {
+        expect(successor).toMatchObject({
+          taskRunId: b.runId,
+          generation: b.generation! + 1,
+          delivery: { status: "not_required" },
+        });
+        expect(successorTask).toMatchObject({
+          runId: b.runId,
+          parentFlowId: undefined,
+          deliveryStatus: "not_applicable",
+          detail: { runtime: "subagent", generation: successor.generation },
+        });
+      }
       if (abortedRecovery) {
         // Free capacity while the original Stop owns C's reservation, before B1 ends.
         expect(releaseSwarmRun("a")).toBe(true);
@@ -457,14 +471,21 @@ it.each(
       const displaced = scenario.startsWith("replacement");
       if (displaced || scenario.endsWith("rollback")) {
         const taskRuntime = getDetachedTaskLifecycleRuntime();
-        if (scenario === "registration rollback") {
-          fixture.persist.mockImplementation((runs, ids) => {
-            if (runs.has("unrelated")) {
-              throw new Error("registration write rejected");
-            }
-            persistSubagentRunsToDiskOrThrow(runs, ids);
-          });
-        } else if (scenario === "required-task rollback") {
+        const registrationFailure =
+          scenario === "registration rollback"
+            ? (() => {
+                const database = openOpenClawStateDatabase().db;
+                const triggerName = "reject_unrelated_registration";
+                database.exec(`
+                  CREATE TEMP TRIGGER ${triggerName}
+                  BEFORE INSERT ON subagent_runs
+                  WHEN NEW.run_id = 'unrelated'
+                  BEGIN SELECT RAISE(ABORT, 'registration write rejected'); END
+                `);
+                return { database, triggerName };
+              })()
+            : undefined;
+        if (scenario === "required-task rollback") {
           setDetachedTaskLifecycleRuntime({
             ...taskRuntime,
             createQueuedTaskRun: () => {
@@ -509,7 +530,9 @@ it.each(
             expect(register).toThrow(/rejected/);
           }
         } finally {
-          fixture.persist.mockImplementation(persistSubagentRunsToDiskOrThrow);
+          if (registrationFailure) {
+            registrationFailure.database.exec(`DROP TRIGGER ${registrationFailure.triggerName}`);
+          }
           setDetachedTaskLifecycleRuntime(taskRuntime);
         }
         if (scenario === "replacement retired") {
