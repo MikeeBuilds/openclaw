@@ -57,6 +57,11 @@ eligible, but only for actions core classifies as read-only and adapters declari
 host-owned `ctx.assertConversationReadAuthority` through their request lifecycle
 and invoke it synchronously immediately before every provider request, including
 authorization lookups, paginated reads, and retries after a backoff or token refresh.
+Recheck after awaited responses and immediately before publishing response or cache
+state. The grant combines registration and originating request authority, and both
+callbacks close when the V2 handler settles; detached work must not retain them to
+start later reads. Named target discovery must apply the same account and destination
+policy as the final read, without reusing a broader caller's cached directory view.
 Never source this assertion from tool arguments. Read-capable actions
 with side effects, including edits, deletes, reactions, pins, poll votes, and file
 downloads, retain the external exact-current gate even with official trust. The

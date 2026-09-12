@@ -136,6 +136,7 @@ describe("official channel delegated read provenance", () => {
     trustedOfficialInstall?: boolean;
     providerOwnedReadGates?: NonNullable<ChannelPlugin["actions"]>["providerOwnedReadGates"];
     supportsConversationReadAuthority?: boolean;
+    handleReadAction?: ChannelMessageReadAuthorityAdapterV2["handleAction"];
   }) {
     const owner = createPluginRegistry({
       logger: { info() {}, warn() {}, error() {}, debug() {} },
@@ -154,7 +155,12 @@ describe("official channel delegated read provenance", () => {
         describeMessageTool: () => ({ actions: ["read", "search"] }),
         providerOwnedReadGates: options.providerOwnedReadGates,
         ...(options.supportsConversationReadAuthority !== false
-          ? { conversationReadAuthority: { version: 2 as const, handleAction } }
+          ? {
+              conversationReadAuthority: {
+                version: 2 as const,
+                handleAction: options.handleReadAction ?? handleAction,
+              },
+            }
           : {}),
         handleAction,
       },
@@ -197,6 +203,37 @@ describe("official channel delegated read provenance", () => {
       expect.any(Function),
     );
   });
+
+  it.each([false, true])(
+    "closes retained read grants after dispatch (handler rejects=%s)",
+    async (rejects) => {
+      const handleReadAction = vi.fn(async (_ctx: ChannelMessageActionContextV2) => {
+        if (rejects) {
+          throw new Error("provider failed");
+        }
+        return receipt;
+      });
+      registerChannel({
+        trustedOfficialInstall: true,
+        providerOwnedReadGates: true,
+        handleReadAction,
+      });
+      const read = dispatchChannelMessageAction(context);
+      if (rejects) {
+        await expect(read).rejects.toThrow("provider failed");
+      } else {
+        await expect(read).resolves.toBe(receipt);
+      }
+      const retained = handleReadAction.mock.calls[0]?.[0];
+      if (!retained) {
+        throw new Error("Expected the registered V2 handler to receive its grant");
+      }
+      expect(() => retained.assertConversationReadAuthority()).toThrow("read invocation is closed");
+      await expect(retained.prepareConversationReadTarget()).rejects.toThrow(
+        "read invocation is closed",
+      );
+    },
+  );
 
   it.each([
     {

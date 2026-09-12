@@ -5,6 +5,7 @@ import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import type { ChannelDirectoryEntry } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { createChannelTestPluginBase } from "../../test-utils/channel-plugins.js";
+import { targetResolutionAuthority } from "./target-resolution-authority.js";
 type TargetResolverModule = typeof import("./target-resolver.js");
 
 let resetDirectoryCache: TargetResolverModule["resetDirectoryCache"];
@@ -131,6 +132,37 @@ describe("resolveMessagingTarget (directory fallback)", () => {
     expect(mocks.listGroups).toHaveBeenCalledTimes(1);
     expect(mocks.listGroupsLive).toHaveBeenCalledTimes(1);
   });
+
+  it.each([false, true])(
+    "does not reuse configured names for scoped reads or fall back to them (live=%s)",
+    async (hasLiveDirectory) => {
+      mocks.getChannelPlugin.mockReturnValue({
+        directory: {
+          listGroups: mocks.listGroups,
+          ...(hasLiveDirectory ? { listGroupsLive: mocks.listGroupsLive } : {}),
+        },
+      });
+      mocks.listGroups.mockResolvedValue([
+        { kind: "group", id: "channel:123456789", name: "restricted" },
+      ] satisfies ChannelDirectoryEntry[]);
+      mocks.listGroupsLive.mockResolvedValue([]);
+      const params = { cfg, channel: "richchat", input: "restricted" };
+      await expectOkResolution(params);
+
+      const scoped = await targetResolutionAuthority.run(
+        () => {},
+        () => resolveMessagingTarget(params),
+      );
+      expect(scoped.ok).toBe(false);
+      expect(mocks.listGroups).toHaveBeenCalledTimes(1);
+      expect(mocks.listGroupsLive).toHaveBeenCalledTimes(hasLiveDirectory ? 1 : 0);
+
+      // The scoped miss must not replace the ordinary outbound cache either.
+      await expectOkResolution(params);
+      expect(mocks.listGroups).toHaveBeenCalledTimes(1);
+      expect(mocks.listGroupsLive).toHaveBeenCalledTimes(hasLiveDirectory ? 1 : 0);
+    },
+  );
 
   it("does not reuse query-filtered directory misses for later target queries", async () => {
     mocks.getChannelPlugin.mockReturnValue({

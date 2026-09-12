@@ -27,7 +27,10 @@ import {
   resolveNormalizedTargetInput,
   resolveReservedTargetLiteral,
 } from "./target-normalization.js";
-import { assertTargetResolutionCurrent } from "./target-resolution-authority.js";
+import {
+  assertTargetResolutionCurrent,
+  targetResolutionAuthority,
+} from "./target-resolution-authority.js";
 
 /** Directory-backed destination kind used by outbound target resolution. */
 type TargetResolveKind = ChannelDirectoryEntryKind | "channel";
@@ -302,14 +305,11 @@ async function listDirectoryEntries(params: {
   }
   const runtime = params.runtime ?? defaultRuntime;
   const useLive = params.source === "live";
-  const fn =
-    params.kind === "user"
-      ? useLive
-        ? (directory.listPeersLive ?? directory.listPeers)
-        : directory.listPeers
-      : useLive
-        ? (directory.listGroupsLive ?? directory.listGroups)
-        : directory.listGroups;
+  const configured = params.kind === "user" ? directory.listPeers : directory.listGroups;
+  const live = params.kind === "user" ? directory.listPeersLive : directory.listGroupsLive;
+  const fn = useLive
+    ? (live ?? (targetResolutionAuthority.getStore() ? undefined : configured))
+    : configured;
   if (!fn) {
     return [];
   }
@@ -346,6 +346,12 @@ async function getDirectoryEntries(params: {
     runtime: params.runtime,
     plugin: params.plugin,
   };
+  // Invocation-scoped provider policy is not part of the shared cache key.
+  // Resolve through its live projection without reading or publishing entries
+  // from a broader send, operator, or configured-directory visibility scope.
+  if (targetResolutionAuthority.getStore()) {
+    return await listDirectoryEntries({ ...listParams, source: "live" });
+  }
   const cacheQuery = normalizeQuery(params.query ?? "");
   const cacheKey = buildDirectoryCacheKey({
     channel: params.channel,

@@ -18,6 +18,7 @@ import { sendDurableMessageBatchCore } from "../../channels/message/runtime.js";
 import type { ConversationReadInvocationOrigin } from "../../channels/plugins/conversation-read-origin.js";
 import { resolveChannelDefaultAccountId } from "../../channels/plugins/helpers.js";
 import { dispatchChannelMessageAction } from "../../channels/plugins/message-action-dispatch.js";
+import { resolveChannelMessageActionReadPolicy } from "../../channels/plugins/message-action-read-policy.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.public.js";
 import { resolveChannelThreadAddressing } from "../../channels/thread-addressing.js";
 import type { InternalChannelThreadingToolContext } from "../../channels/threading-tool-context-internal.js";
@@ -937,6 +938,7 @@ export const sendHandlers: GatewayRequestHandlers = {
       return;
     }
     const request = p as MessageActionParams;
+    const readPolicy = resolveChannelMessageActionReadPolicy(request.action);
     const trustedContext = resolveTrustedMessageActionToolContext({ client, request });
     if (!trustedContext.ok) {
       respond(false, undefined, trustedContext.error);
@@ -1190,7 +1192,10 @@ export const sendHandlers: GatewayRequestHandlers = {
             });
             payload = result.payload;
           } else {
-            const handled = await dispatchChannelMessageAction(actionContext);
+            const handled = await dispatchChannelMessageAction(
+              actionContext,
+              agentRuntimeAuthority.commitGuard,
+            );
             if (handled) {
               payload = extractToolPayload(handled);
             } else {
@@ -1229,6 +1234,10 @@ export const sendHandlers: GatewayRequestHandlers = {
               deliveredPayload: payload,
             },
           });
+          if (readPolicy?.kind === "conversation-read" && readPolicy.readOnly) {
+            // Read results cannot survive run closure during post-dispatch awaited work.
+            agentRuntimeAuthority.commitGuard?.();
+          }
           return createGatewayInflightSuccess({ context, dedupeKey, payload, channel });
         } catch (err) {
           if (!authorize()) {

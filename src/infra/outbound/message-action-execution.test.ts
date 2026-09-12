@@ -71,6 +71,46 @@ describe("runMessageAction plugin dispatch", () => {
   beforeEach(() => {
     resetMessageActionRunnerMocks();
   });
+  it("routes V2-only gateway reads through RPC without local dispatch", async () => {
+    const handleReadAction = vi.fn(async () => jsonResult({ local: true }));
+    const plugin = createGatewayActionPlugin({
+      pluginId: "v2-gateway",
+      label: "V2 Gateway",
+      blurb: "Versioned read routing fixture",
+      actions: ["read"],
+      gatewayActions: ["read"],
+      handleAction: handleReadAction,
+      messaging: { targetResolver: { looksLikeId: () => true } },
+    });
+    if (!plugin.actions) {
+      throw new Error("Expected fixture actions");
+    }
+    plugin.actions = {
+      ...plugin.actions,
+      handleAction: undefined,
+      providerOwnedReadGates: true,
+      conversationReadAuthority: { version: 2, handleAction: handleReadAction },
+    };
+    setTestPlugin(plugin, "v2-gateway");
+    mocks.callGatewayLeastPrivilege.mockResolvedValue({ remote: true });
+    const result = await runMessageAction({
+      cfg: {},
+      action: "read",
+      params: { channel: "v2-gateway", channelId: "123" },
+      conversationReadOrigin: "direct-operator",
+      gateway: { clientName: "cli", mode: "cli" },
+    });
+    expect(result.payload).toEqual({ remote: true });
+    expect(mocks.callGatewayLeastPrivilege).toHaveBeenCalledOnce();
+    expect(mocks.callGatewayLeastPrivilege).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "message.action",
+        params: expect.objectContaining({ action: "read", channel: "v2-gateway" }),
+      }),
+    );
+    expect(handleReadAction).not.toHaveBeenCalled();
+    setActivePluginRegistry(createTestRegistry([]));
+  });
   describe("alias-based plugin action dispatch", () => {
     const { handleAction, plugin: actionHubPlugin } = createActionHubPluginFixture();
 

@@ -568,6 +568,7 @@ export function shouldDeferExternalMessageActionTargetResolution(
  */
 export async function dispatchChannelMessageAction(
   ctx: ChannelMessageActionDispatchContext,
+  assertRequestAuthority?: () => void,
 ): Promise<AgentToolResult<unknown> | null> {
   const prepared = prepareMessageActionReadContext(ctx);
   if (!prepared) {
@@ -613,35 +614,49 @@ export async function dispatchChannelMessageAction(
   ) {
     return null;
   }
-  prepared.assertReadAuthorityCurrent?.();
-  try {
-    if (prepared.assertReadAuthorityCurrent) {
+  const assertRegistrationCurrent = prepared.assertReadAuthorityCurrent;
+  if (assertRegistrationCurrent) {
+    let invocationOpen = true;
+    const assertReadAuthorityCurrent = () => {
+      if (!invocationOpen) {
+        throw new Error("Conversation read invocation is closed.");
+      }
+      assertRequestAuthority?.();
+      assertRegistrationCurrent();
+    };
+    assertReadAuthorityCurrent();
+    try {
       if (actions.conversationReadAuthority?.version !== 2) {
         throw new Error("Versioned conversation read authority adapter is required.");
       }
       return await actions.conversationReadAuthority.handleAction({
         ...authorizedActionContext,
         // Never accept an assertion supplied by the caller or tool arguments.
-        assertConversationReadAuthority: prepared.assertReadAuthorityCurrent,
+        assertConversationReadAuthority: assertReadAuthorityCurrent,
         prepareConversationReadTarget: async () => {
+          assertReadAuthorityCurrent();
           const { prepareConversationReadTarget } =
             await import("../../infra/outbound/message-action-target-resolution.js");
           await prepareConversationReadTarget(
             authorizedActionContext,
             plugin,
-            prepared.assertReadAuthorityCurrent!,
+            assertReadAuthorityCurrent,
           );
         },
       });
+    } finally {
+      try {
+        // Fence the result/error before closing every retained callback from this invocation.
+        assertReadAuthorityCurrent();
+      } finally {
+        invocationOpen = false;
+      }
     }
-    return actions.handleAction
-      ? await actions.handleAction({
-          ...authorizedActionContext,
-          assertConversationReadAuthority: undefined,
-        })
-      : null;
-  } finally {
-    // A replaced/disabled owner cannot publish late read data, including provider errors.
-    prepared.assertReadAuthorityCurrent?.();
   }
+  return actions.handleAction
+    ? await actions.handleAction({
+        ...authorizedActionContext,
+        assertConversationReadAuthority: undefined,
+      })
+    : null;
 }

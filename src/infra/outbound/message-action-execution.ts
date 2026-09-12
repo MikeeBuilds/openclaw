@@ -284,7 +284,10 @@ export async function executeGatewayAction(
   if (ctx.dryRun || !ctx.gateway) {
     return null;
   }
-  if (!ctx.channelPlugin?.actions?.handleAction) {
+  if (
+    !ctx.channelPlugin?.actions?.handleAction &&
+    ctx.channelPlugin?.actions?.conversationReadAuthority?.version !== 2
+  ) {
     return null;
   }
   const executionMode =
@@ -581,33 +584,38 @@ export async function executeMessagePlugin(
   }
 
   const authorization = input.messageActionAuthorization;
-  const handled = await dispatchChannelMessageAction({
-    channel,
-    action,
-    cfg,
-    params,
-    mediaAccess,
-    mediaLocalRoots: mediaAccess.localRoots,
-    mediaReadFile: mediaAccess.readFile,
-    accountId: accountId ?? undefined,
-    requesterAccountId:
-      authorization !== undefined
-        ? authorization.requesterAccountId
-        : (input.requesterAccountId ?? undefined),
-    requesterSenderId:
-      authorization !== undefined
-        ? authorization.requesterSenderId
-        : (input.requesterSenderId ?? undefined),
-    senderIsOwner: input.senderIsOwner,
-    conversationReadOrigin: normalizeConversationReadInvocationOrigin(input.conversationReadOrigin),
-    sessionKey: input.sessionKey,
-    sessionId: input.sessionId,
-    inboundEventKind: input.inboundEventKind,
-    agentId,
-    gateway,
-    toolContext: authorization !== undefined ? authorization.toolContext : input.toolContext,
-    dryRun,
-  });
+  const handled = await dispatchChannelMessageAction(
+    {
+      channel,
+      action,
+      cfg,
+      params,
+      mediaAccess,
+      mediaLocalRoots: mediaAccess.localRoots,
+      mediaReadFile: mediaAccess.readFile,
+      accountId: accountId ?? undefined,
+      requesterAccountId:
+        authorization !== undefined
+          ? authorization.requesterAccountId
+          : (input.requesterAccountId ?? undefined),
+      requesterSenderId:
+        authorization !== undefined
+          ? authorization.requesterSenderId
+          : (input.requesterSenderId ?? undefined),
+      senderIsOwner: input.senderIsOwner,
+      conversationReadOrigin: normalizeConversationReadInvocationOrigin(
+        input.conversationReadOrigin,
+      ),
+      sessionKey: input.sessionKey,
+      sessionId: input.sessionId,
+      inboundEventKind: input.inboundEventKind,
+      agentId,
+      gateway,
+      toolContext: authorization !== undefined ? authorization.toolContext : input.toolContext,
+      dryRun,
+    },
+    () => throwIfAborted(abortSignal),
+  );
   if (!handled) {
     throw new Error(`Message action ${action} not supported for channel ${channel}.`);
   }

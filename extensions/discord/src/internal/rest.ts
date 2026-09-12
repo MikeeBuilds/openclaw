@@ -282,7 +282,11 @@ export class RequestClient {
         params.assertConversationReadAuthority,
         () => (this.customFetch ?? fetch)(url, { method, headers, body, signal }),
       );
+      params.assertConversationReadAuthority?.();
       const text = await readResponseBodyText(response, this.options.timeout ?? 15_000);
+      // Both the response and its body can outlive the originating owner. Do not
+      // publish rate-limit state or return data to shared caches after revocation.
+      params.assertConversationReadAuthority?.();
       const parsed = coerceResponseBody(text);
       this.scheduler.recordResponse(routeKey, path, response, parsed);
       if (response.status === 204) {
@@ -302,6 +306,8 @@ export class RequestClient {
       }
       return parsed;
     } catch (error) {
+      // An authority failure after fetch can leave the response body unread.
+      controller.abort();
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error;
       }

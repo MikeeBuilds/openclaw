@@ -28,7 +28,10 @@ import { resolveOutboundTargetWithPlugin } from "../../infra/outbound/targets-re
 import { buildOutboundMediaLoadOptions } from "../../media/load-options.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
 import { loadBundledPluginPublicSurface } from "../../plugin-sdk/test-helpers/public-surface-loader.js";
+import { createPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import type { PluginRuntime } from "../../plugins/runtime/types.js";
+import { createPluginRecord } from "../../plugins/status.test-fixtures.js";
 import { AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE } from "../../sessions/agent-harness-session-key.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import {
@@ -898,6 +901,82 @@ describe("gateway send mirroring", () => {
     expect(mocks.dispatchChannelMessageAction).toHaveBeenCalledOnce();
     expect(lastDispatchChannelMessageActionCall()?.action).toBe("channel-info");
   });
+
+  it.each(["request", "result"] as const)(
+    "fences official V2 reads when run authority closes before the next %s",
+    async (boundary) => {
+      const { dispatchChannelMessageAction } = await vi.importActual<
+        typeof import("../../channels/plugins/message-action-dispatch.js")
+      >("../../channels/plugins/message-action-dispatch.js");
+      const plugin = registerMessageActionPlugin({
+        id: "discord",
+        registrySuffix: `v2-run-${boundary}`,
+      });
+      const started = createDeferred();
+      const resume = createDeferred();
+      const providerRequest = vi.fn();
+      plugin.actions = {
+        describeMessageTool: () => ({ actions: ["channel-info"] }),
+        providerOwnedReadGates: true,
+        conversationReadAuthority: {
+          version: 2,
+          handleAction: async (ctx) => {
+            providerRequest();
+            started.resolve();
+            await resume.promise;
+            if (boundary === "request") {
+              ctx.assertConversationReadAuthority();
+              providerRequest();
+            }
+            return jsonResult({ privateData: "must not publish after revocation" });
+          },
+        },
+      };
+      const owner = createPluginRegistry({
+        logger: { info() {}, warn() {}, error() {}, debug() {} },
+        runtime: {} as PluginRuntime,
+        activateGlobalSideEffects: false,
+      });
+      const record = createPluginRecord({
+        id: "discord",
+        origin: "global",
+        trustedOfficialInstall: true,
+      });
+      owner.registry.plugins.push(record);
+      owner.createApi(record, { config: {}, registrationMode: "full" }).registerChannel({ plugin });
+      setActivePluginRegistry(owner.registry);
+      mocks.dispatchChannelMessageAction.mockImplementationOnce(dispatchChannelMessageAction);
+      let authorityActive = true;
+      const context = {
+        ...makeContext(),
+        validateAgentRuntimeApprovalAuthority: () => authorityActive,
+      } as GatewayRequestContext;
+      const pending = runMessageActionRequest(
+        {
+          channel: "discord",
+          action: "channel-info",
+          params: { channelId: "123" },
+          sessionKey: "agent:main:discord:channel:123",
+          idempotencyKey: `v2-run-${boundary}`,
+        },
+        undefined,
+        context,
+      );
+      await Promise.race([
+        started.promise,
+        pending.then(() => {
+          throw new Error("Expected V2 read entry");
+        }),
+      ]);
+      authorityActive = false;
+      resume.resolve();
+      const { respond } = await pending;
+      expect(firstRespondCall(respond)[0]).toBe(false);
+      expect(firstRespondCall(respond)[2]?.message).toContain("authority is no longer active");
+      expect(providerRequest).toHaveBeenCalledOnce();
+      expect(mocks.appendAssistantMessageToSessionTranscript).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses the resolved runtime config for message.action when the source snapshot matches", async () => {
     const sourceConfig = createDiscordSourceConfig();
@@ -3140,6 +3219,7 @@ describe("gateway send mirroring", () => {
           currentMessagingTarget: "user:15551234567",
         }),
       }),
+      undefined,
     );
   });
 
@@ -3174,6 +3254,7 @@ describe("gateway send mirroring", () => {
         requesterSenderId: undefined,
         toolContext: undefined,
       }),
+      undefined,
     );
   });
 
@@ -3224,6 +3305,7 @@ describe("gateway send mirroring", () => {
         requesterSenderId: undefined,
         toolContext: undefined,
       }),
+      undefined,
     );
   });
 
@@ -3492,6 +3574,7 @@ describe("gateway send mirroring", () => {
     );
     expect(mocks.dispatchChannelMessageAction).toHaveBeenCalledWith(
       expect.objectContaining({ sessionKey: policySessionKey }),
+      undefined,
     );
   });
 

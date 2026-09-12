@@ -4,6 +4,7 @@ import {
   asDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
+import { discordConversationReadAuthority } from "../conversation-read-authority.js";
 import { getGuild, getGuildMember } from "./api.guild.js";
 import { getChannel } from "./api.messages.js";
 import { getUser } from "./api.users.js";
@@ -111,6 +112,8 @@ export class DiscordEntityCache {
   }
 
   private async fetchCached<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+    const assertConversationReadAuthority = discordConversationReadAuthority.getStore();
+    assertConversationReadAuthority?.();
     const ttl = this.params.ttlMs ?? DEFAULT_REST_CACHE_TTL_MS;
     const rawNow = Date.now();
     const now = asDateTimestampMs(rawNow);
@@ -124,6 +127,9 @@ export class DiscordEntityCache {
       }
     }
     const value = await fetcher();
+    // Normalization can await beyond the REST fence. Retain the original owner
+    // and validate it before evicting entries or publishing into this shared cache.
+    assertConversationReadAuthority?.();
     if (ttl > 0) {
       const expiresAt = resolveExpiresAtMsFromDurationMs(ttl, { nowMs: rawNow });
       if (expiresAt !== undefined) {

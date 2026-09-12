@@ -1,8 +1,10 @@
 // Discord tests cover entity cache plugin behavior.
 import { GatewayDispatchEvents } from "discord-api-types/v10";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { discordConversationReadAuthority } from "../conversation-read-authority.js";
 import { DiscordEntityCache } from "./entity-cache.js";
-import type { RequestClient } from "./rest.js";
+import { RequestClient } from "./rest.js";
 import type { StructureClient } from "./structures.js";
 
 function makeCache(opts: { ttlMs?: number; maxEntries?: number; sweepIntervalMs?: number }) {
@@ -144,4 +146,83 @@ describe("DiscordEntityCache gateway invalidation", () => {
     await cache.fetchUser("u1");
     expect(getCalls()).toBe(4);
   });
+});
+
+describe("DiscordEntityCache read authority", () => {
+  it.each([false, true])(
+    "rechecks the originating owner after normalization awaits beyond REST (replaced=%s)",
+    async (replaced) => {
+      const restValue = [{ name: "original", identifier: "original:1" }];
+      const replacementValue = [{ name: "replacement", identifier: "replacement:2" }];
+      const otherGuildValue = [{ name: "other", identifier: "other:3" }];
+      const rest = new RequestClient("synthetic-cache-token", {
+        queueRequests: false,
+        fetch: async () => new Response(JSON.stringify(restValue)),
+      });
+      const cache = new DiscordEntityCache({
+        rest,
+        client: {
+          rest,
+          fetchUser: async () => {
+            throw new Error("Unexpected user fetch in emoji cache fixture");
+          },
+        },
+      });
+      await cache.fetchGuildEmojis("other-guild", async () => otherGuildValue);
+      const restCompleted = createDeferred<void>();
+      const normalized = createDeferred<void>();
+      const originalOwner = {};
+      let currentOwner = originalOwner;
+      const assertOriginalOwner = () => {
+        if (currentOwner !== originalOwner) {
+          throw new Error("Synthetic cache read owner was replaced");
+        }
+      };
+      const pending = discordConversationReadAuthority.run(assertOriginalOwner, () =>
+        cache.fetchGuildEmojis("guild", async () => {
+          const value = await rest.get("/guilds/123456789012345678/emojis");
+          restCompleted.resolve();
+          await normalized.promise;
+          return value;
+        }),
+      );
+      const outcome = Promise.allSettled([pending]);
+      try {
+        await restCompleted.promise;
+        expect(cache.size).toBe(1);
+        if (replaced) {
+          currentOwner = {};
+          await cache.fetchGuildEmojis("guild", async () => replacementValue);
+        }
+        normalized.resolve();
+        expect(await outcome).toEqual([
+          replaced
+            ? { status: "rejected", reason: new Error("Synthetic cache read owner was replaced") }
+            : { status: "fulfilled", value: restValue },
+        ]);
+        const unexpectedFetch = vi.fn(async () => []);
+        // The late original result must not overwrite the healthy replacement or
+        // evict another guild; both reads must still be served from the cache.
+        await expect(cache.fetchGuildEmojis("guild", unexpectedFetch)).resolves.toEqual(
+          replaced ? replacementValue : restValue,
+        );
+        await expect(cache.fetchGuildEmojis("other-guild", unexpectedFetch)).resolves.toEqual(
+          otherGuildValue,
+        );
+        if (replaced) {
+          await expect(
+            discordConversationReadAuthority.run(assertOriginalOwner, () =>
+              cache.fetchGuildEmojis("guild", unexpectedFetch),
+            ),
+          ).rejects.toThrow("Synthetic cache read owner was replaced");
+        }
+        expect(unexpectedFetch).not.toHaveBeenCalled();
+        expect(cache.size).toBe(2);
+      } finally {
+        normalized.resolve();
+        rest.abortAllRequests();
+        await outcome;
+      }
+    },
+  );
 });
