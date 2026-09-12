@@ -4,9 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { discordConversationReadAuthority } from "./conversation-read-authority.js";
 import { RequestClient } from "./internal/rest.js";
 
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn<() => Promise<{ address: string; family: number }[]>>(),
+}));
+
 vi.mock("node:dns/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:dns/promises")>();
-  return { ...actual, lookup: vi.fn() };
+  return { ...actual, lookup: lookupMock };
 });
 
 // Exercise real transport preparation; the guard normally skips DNS for mocked fetch.
@@ -22,7 +26,7 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
-  vi.mocked(lookup).mockReset();
+  lookupMock.mockReset();
 });
 
 describe("Discord endpoint request authority after transport preparation", () => {
@@ -34,9 +38,9 @@ describe("Discord endpoint request authority after transport preparation", () =>
     "checks the request owner after DNS (queued=$queueRequests, revoked=$revoked)",
     async ({ queueRequests, revoked }) => {
       vi.stubEnv("DISCORD_API_URL", "https://discord-endpoint.example.com/api/v10");
-      const started = createDeferred();
+      const started = createDeferred<void>();
       const resolved = createDeferred<{ address: string; family: number }[]>();
-      vi.mocked(lookup).mockImplementation(async () => {
+      lookupMock.mockImplementation(async () => {
         started.resolve();
         return await resolved.promise;
       });
