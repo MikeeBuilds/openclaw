@@ -74,7 +74,7 @@ describe("Discord directory API read authority", () => {
       expect(fetcher).toHaveBeenCalledTimes(2);
     }
     for (const [url, init] of fetcher.mock.calls) {
-      expect(String(url)).toBe("https://discord.com/api/v10/users/@me/guilds");
+      expect(url).toBe("https://discord.com/api/v10/users/@me/guilds");
       expect(new Headers(init?.headers).get("Authorization")).toBe("Bot synthetic-api-token");
     }
   });

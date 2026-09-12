@@ -85,7 +85,7 @@ describe("Discord endpoint request authority after transport preparation", () =>
           expect(result).toEqual({ status: "fulfilled", value: { id: "synthetic-user" } });
           expect(network).toHaveBeenCalledOnce();
           const [url, init] = network.mock.calls[0]!;
-          expect(String(url)).toBe("https://discord-endpoint.example.com/api/v10/users/@me");
+          expect(url).toBe("https://discord-endpoint.example.com/api/v10/users/@me");
           expect(new Headers(init?.headers).get("Authorization")).toBe(
             "Bot synthetic-endpoint-token",
           );
