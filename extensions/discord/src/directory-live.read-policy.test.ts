@@ -14,6 +14,7 @@ const deniedChannelId = "200000000000000002";
 const deniedCategoryId = "200000000000000003";
 const nestedChannelId = "200000000000000004";
 const unlistedChannelId = "200000000000000005";
+const currentThreadId = "200000000000000006";
 const allowedUserId = "300000000000000001";
 const excludedUserId = "300000000000000002";
 const allowedChannel = {
@@ -53,6 +54,8 @@ function config(channelScoped = true): OpenClawConfig {
 }
 
 const paths: string[] = [];
+let currentThreadName = "current-thread";
+let currentThreadParentId = allowedChannelId;
 
 function fixtureFetch(input: Parameters<typeof fetch>[0]): Response {
   const url = new URL(urlToString(input));
@@ -72,6 +75,14 @@ function fixtureFetch(input: Parameters<typeof fetch>[0]): Response {
       return Response.json({ id: allowedGuildId, name: "Allowed Guild" });
     case `/channels/${allowedChannelId}`:
       return Response.json(allowedChannel);
+    case `/channels/${currentThreadId}`:
+      return Response.json({
+        id: currentThreadId,
+        name: currentThreadName,
+        guild_id: allowedGuildId,
+        type: 11,
+        parent_id: currentThreadParentId,
+      });
     case `/channels/${nestedChannelId}`:
       return Response.json({
         id: nestedChannelId,
@@ -89,6 +100,8 @@ function fixtureFetch(input: Parameters<typeof fetch>[0]): Response {
       });
     case `/channels/${allowedChannelId}/messages`:
       return Response.json([{ id: "400000000000000001", content: "allowed message" }]);
+    case `/channels/${currentThreadId}/messages`:
+      return Response.json([{ id: "400000000000000002", content: "current thread message" }]);
     case `/guilds/${allowedGuildId}/members/search`:
       return Response.json([{ user: { id: allowedUserId, username: "allowed-user" } }]);
     case `/guilds/${excludedGuildId}/members/search`:
@@ -124,6 +137,8 @@ async function invoke(
 
 beforeEach(() => {
   paths.length = 0;
+  currentThreadName = "current-thread";
+  currentThreadParentId = allowedChannelId;
   clearDiscordDirectoryCacheForTest();
   vi.stubEnv("DISCORD_BOT_TOKEN", "");
   vi.stubGlobal(
@@ -138,6 +153,134 @@ afterEach(() => {
 });
 
 describe("Discord V2 named read target directory policy", () => {
+  it.each(["delegated", "direct-operator"] as const)(
+    "reads the named current thread omitted by its listed guild directory (%s)",
+    async (conversationReadOrigin) => {
+      const cfg = config();
+      await expect(
+        invoke(
+          cfg,
+          async (params) => {
+            const rows = await listDiscordDirectoryGroupsLive({ cfg, query: currentThreadName });
+            expect(rows.map((row) => row.id)).toEqual([`channel:${currentThreadId}`]);
+            params.channelId = rows[0]?.id;
+          },
+          {
+            conversationReadOrigin,
+            toolContext: { currentChannelProvider: "discord", currentChannelId: currentThreadId },
+          },
+        ),
+      ).resolves.toMatchObject({ details: { ok: true } });
+      expect(paths).toContain(`/guilds/${allowedGuildId}/channels`);
+      expect(paths.filter((path) => path.endsWith("/messages"))).toEqual([
+        `/channels/${currentThreadId}/messages`,
+      ]);
+      if (conversationReadOrigin === "delegated") {
+        expect(paths).not.toContain(`/guilds/${excludedGuildId}/channels`);
+      }
+    },
+  );
+
+  it("retains same-name thread and channel candidates instead of misrouting the read", async () => {
+    const cfg = config();
+    currentThreadName = allowedChannel.name;
+    await expect(
+      invoke(
+        cfg,
+        async (params) => {
+          const rows = await listDiscordDirectoryGroupsLive({ cfg, query: currentThreadName });
+          expect(rows.map((row) => row.id)).toEqual([
+            `channel:${currentThreadId}`,
+            `channel:${allowedChannelId}`,
+          ]);
+          if (rows.length !== 1) {
+            throw new Error("Ambiguous directory target");
+          }
+          params.channelId = rows[0]?.id;
+        },
+        {
+          toolContext: { currentChannelProvider: "discord", currentChannelId: currentThreadId },
+        },
+      ),
+    ).rejects.toThrow("Ambiguous directory target");
+    expect(paths.some((path) => path.endsWith("/messages"))).toBe(false);
+    expect(paths).not.toContain(`/guilds/${excludedGuildId}/channels`);
+  });
+
+  it("counts an already enumerated current channel once by exact ID", async () => {
+    const cfg = config();
+    await expect(
+      invoke(
+        cfg,
+        async (params) => {
+          const rows = await listDiscordDirectoryGroupsLive({ cfg, query: allowedChannel.name });
+          expect(rows.map((row) => row.id)).toEqual([`channel:${allowedChannelId}`]);
+          params.channelId = rows[0]?.id;
+        },
+        {
+          toolContext: { currentChannelProvider: "discord", currentChannelId: allowedChannelId },
+        },
+      ),
+    ).resolves.toMatchObject({ details: { ok: true } });
+    expect(paths).toContain(`/guilds/${allowedGuildId}/channels`);
+    expect(paths.filter((path) => path.endsWith("/messages"))).toEqual([
+      `/channels/${allowedChannelId}/messages`,
+    ]);
+  });
+
+  it.each(["account", "group", "thread", "parent", "category"])(
+    "does not project the listed guild's current thread past a %s denial",
+    async (restriction) => {
+      if (restriction === "category") {
+        currentThreadParentId = nestedChannelId;
+      }
+      const cfg: OpenClawConfig = {
+        channels: {
+          discord: {
+            token: "synthetic-current-thread-token",
+            groupPolicy: restriction === "group" ? "disabled" : "allowlist",
+            guilds: {
+              [allowedGuildId]: {
+                channels: {
+                  [currentThreadId]: { enabled: restriction !== "thread" },
+                  [allowedChannelId]: { enabled: restriction !== "parent" },
+                  [deniedCategoryId]: { enabled: restriction !== "category" },
+                },
+              },
+            },
+          },
+        },
+      };
+      await expect(
+        invoke(
+          cfg,
+          async () => {
+            expect(await listDiscordDirectoryGroupsLive({ cfg, query: currentThreadName })).toEqual(
+              [],
+            );
+            throw new Error("No matching directory target");
+          },
+          {
+            requesterAccountId: restriction === "account" ? "other" : "default",
+            toolContext: { currentChannelProvider: "discord", currentChannelId: currentThreadId },
+          },
+        ),
+      ).rejects.toThrow(
+        restriction === "account"
+          ? "Discord read target account is not allowed"
+          : "No matching directory target",
+      );
+      expect(paths.some((path) => path.endsWith("/messages"))).toBe(false);
+      expect(paths).not.toContain(`/guilds/${excludedGuildId}/channels`);
+      if (restriction === "account") {
+        expect(paths).toEqual([]);
+      }
+      if (restriction === "category") {
+        expect(paths).toContain(`/channels/${deniedCategoryId}`);
+      }
+    },
+  );
+
   it("resolves only the trusted current row from an unconfigured guild before applying the limit", async () => {
     const cfg: OpenClawConfig = {
       channels: {
@@ -166,7 +309,7 @@ describe("Discord V2 named read target directory policy", () => {
               raw: { id: allowedChannelId, name: "shared-name", guild_id: allowedGuildId },
             },
           ]);
-          params.channelId = rows[0].id;
+          params.channelId = rows[0]?.id;
         },
         {
           toolContext: { currentChannelProvider: "discord", currentChannelId: allowedChannelId },
@@ -252,7 +395,7 @@ describe("Discord V2 named read target directory policy", () => {
       invoke(cfg, async (params) => {
         const rows = await listDiscordDirectoryGroupsLive({ cfg, query: "shared-name", limit: 1 });
         expect(rows.map((row) => row.id)).toEqual([`channel:${allowedChannelId}`]);
-        params.channelId = rows[0].id;
+        params.channelId = rows[0]?.id;
       }),
     ).resolves.toMatchObject({ details: { ok: true } });
 

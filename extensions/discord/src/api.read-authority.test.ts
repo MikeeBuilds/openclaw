@@ -1,6 +1,6 @@
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestDiscord } from "./api.js";
+import { DiscordApiError, requestDiscord } from "./api.js";
 import { discordConversationReadAuthority } from "./conversation-read-authority.js";
 import { discordDirectoryCacheState } from "./directory-cache-state.js";
 import { rememberDiscordDirectoryUser, resolveDiscordDirectoryUserId } from "./directory-cache.js";
@@ -28,6 +28,90 @@ function authority() {
 }
 
 describe("Discord directory API read authority", () => {
+  it.each([403, 429].flatMap((status) => [false, true].map((revoked) => ({ status, revoked }))))(
+    "fences a delayed HTTP $status error body (revoked=$revoked)",
+    async ({ status, revoked }) => {
+      vi.useFakeTimers();
+      const owner = authority();
+      const started = createDeferred<void>();
+      const release = createDeferred<void>();
+      const response = new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            async pull(controller) {
+              started.resolve();
+              await release.promise;
+              controller.enqueue(
+                new TextEncoder().encode(
+                  JSON.stringify({ message: "Synthetic body", retry_after: 1 }),
+                ),
+              );
+              controller.close();
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+        { status },
+      );
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(response)
+        .mockResolvedValueOnce(jsonResponse([{ id: "123456789012345678", name: "healthy retry" }]));
+      let settled: PromiseSettledResult<unknown>[] | undefined;
+      const pending = discordConversationReadAuthority.run(owner.assert, () =>
+        requestDiscord("/users/@me/guilds", "synthetic-api-token", {
+          fetcher,
+          endpointRuntime: null,
+          retry: { attempts: 2, minDelayMs: 1000, maxDelayMs: 1000, jitter: 0 },
+        }),
+      );
+      const outcome = Promise.allSettled([pending]).then((results) => {
+        settled = results;
+        return results;
+      });
+      try {
+        await started.promise;
+        if (revoked) {
+          owner.revoke();
+        }
+        release.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        if (revoked) {
+          // A revoked 429 must reject now, without entering its retry timer.
+          expect(settled).toEqual([
+            { status: "rejected", reason: new Error("Synthetic API read authority revoked") },
+          ]);
+          expect(vi.getTimerCount()).toBe(0);
+          expect(fetcher).toHaveBeenCalledOnce();
+        } else if (status === 403) {
+          expect(settled).toEqual([
+            {
+              status: "rejected",
+              reason: expect.objectContaining({
+                status: 403,
+                message: expect.stringContaining("Synthetic body"),
+              }),
+            },
+          ]);
+          await expect(pending).rejects.toBeInstanceOf(DiscordApiError);
+          expect(fetcher).toHaveBeenCalledOnce();
+        } else {
+          expect(settled).toBeUndefined();
+          expect(fetcher).toHaveBeenCalledOnce();
+          await vi.advanceTimersByTimeAsync(1000);
+          expect(await outcome).toEqual([
+            { status: "fulfilled", value: [{ id: "123456789012345678", name: "healthy retry" }] },
+          ]);
+          expect(fetcher).toHaveBeenCalledTimes(2);
+        }
+      } finally {
+        release.resolve();
+        await vi.runAllTimersAsync();
+        await outcome;
+      }
+    },
+  );
+
   it.each([false, true])("rechecks authority before a 429 retry (revoked=%s)", async (revoked) => {
     vi.useFakeTimers();
     const owner = authority();

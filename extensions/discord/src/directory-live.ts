@@ -86,11 +86,17 @@ export async function listDiscordDirectoryGroupsLive(
   const guilds =
     policy?.filterDirectoryGuilds({ guilds: allGuilds, filteredChannels: true }) ?? allGuilds;
   const rows: ChannelDirectoryEntry[] = [];
+  const seenChannelIds = new Set<string>();
   const appendChannel = (channel: DiscordChannel): boolean => {
     const name = channel.name?.trim();
-    if (!name || (query && !normalizeDiscordSlug(name).includes(normalizeDiscordSlug(query)))) {
+    if (
+      seenChannelIds.has(channel.id) ||
+      !name ||
+      (query && !normalizeDiscordSlug(name).includes(normalizeDiscordSlug(query)))
+    ) {
       return false;
     }
+    seenChannelIds.add(channel.id);
     rows.push({
       kind: "group",
       id: `channel:${channel.id}`,
@@ -102,7 +108,6 @@ export async function listDiscordDirectoryGroupsLive(
   };
   const currentChannel = await policy?.resolveDirectoryCurrentChannel({
     guilds: allGuilds,
-    listedGuildIds: new Set(guilds.map((guild) => guild.id)),
   });
   if (currentChannel && appendChannel(currentChannel)) {
     return rows;

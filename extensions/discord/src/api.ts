@@ -217,6 +217,7 @@ export async function requestDiscord<T>(
           const text = await readResponseTextLimited(res, DISCORD_API_ERROR_BODY_LIMIT_BYTES).catch(
             () => "",
           );
+          assertCurrent?.();
           const detail = formatDiscordApiErrorText(text, res);
           const suffix = detail ? `: ${detail}` : "";
           const retryAfter =
