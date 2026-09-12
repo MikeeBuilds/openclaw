@@ -61,6 +61,10 @@ function responseFor(input: Parameters<typeof fetch>[0], init?: RequestInit) {
 }
 
 function registerDiscord(v2Only = false) {
+  const actions = discordPlugin.actions;
+  if (!actions) {
+    throw new Error("Discord fixture requires the real action adapter");
+  }
   // This is registered-adapter composition proof, not installed-package provenance proof.
   const owner = createPluginRegistry({
     logger: { info() {}, warn() {}, error() {}, debug() {} },
@@ -78,7 +82,7 @@ function registerDiscord(v2Only = false) {
   instance.run(() => {
     owner.createApi(record, { config: {}, registrationMode: "full" }).registerChannel({
       plugin: v2Only
-        ? { ...discordPlugin, actions: { ...discordPlugin.actions, handleAction: undefined } }
+        ? { ...discordPlugin, actions: { ...actions, handleAction: undefined } }
         : discordPlugin,
     });
   });
@@ -111,7 +115,7 @@ function invoke(
       },
     },
   };
-  const context: ChannelMessageActionContext = {
+  const context = {
     channel: "discord",
     action: "read",
     cfg,
@@ -124,7 +128,7 @@ function invoke(
       currentChannelProvider: "discord",
       currentChannelId: options.currentChannel ?? currentChannelId,
     },
-  };
+  } satisfies ChannelMessageActionContext;
   return options.runner
     ? runMessageAction({ ...context, params: { ...context.params, channel: "discord" } })
     : dispatchChannelMessageAction(context);
@@ -170,8 +174,12 @@ describe("registered official Discord read authority through HTTP", () => {
     registerDiscord();
     fetchMock.mockImplementation(async (input, init) => {
       const path = requestPath(input);
-      if (path === "/users/@me/guilds") return jsonResponse([{ id: guildId, name: "fixture" }]);
-      if (path === `/guilds/${guildId}/channels`) return jsonResponse([channel]);
+      if (path === "/users/@me/guilds") {
+        return jsonResponse([{ id: guildId, name: "fixture" }]);
+      }
+      if (path === `/guilds/${guildId}/channels`) {
+        return jsonResponse([channel]);
+      }
       return responseFor(input, init);
     });
     await expect(invoke({ runner: true, target: "synthetic-target" })).resolves.toMatchObject({
