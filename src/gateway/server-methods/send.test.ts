@@ -27,13 +27,13 @@ import { OutboundDeliveryError } from "../../infra/outbound/deliver-types.js";
 import { resolveOutboundTargetWithPlugin } from "../../infra/outbound/targets-resolve-shared.js";
 import { buildOutboundMediaLoadOptions } from "../../media/load-options.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
-import { loadBundledPluginPublicSurface } from "../../plugin-sdk/test-helpers/public-surface-loader.js";
 import { createPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import type { PluginRuntime } from "../../plugins/runtime/types.js";
 import { createPluginRecord } from "../../plugins/status.test-fixtures.js";
 import { AGENT_HARNESS_SESSION_KEY_RESERVED_MESSAGE } from "../../sessions/agent-harness-session-key.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
+import { loadBundledPluginFacade } from "../../test-utils/bundled-plugin-public-surface.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -1599,7 +1599,7 @@ describe("gateway send mirroring", () => {
   it.each([false, true])(
     "keeps Telegram plugin action sends bound to their live owner (close during first send: %s)",
     async (closeDuringFirstSend) => {
-      const { telegramMessageActions } = await loadBundledPluginPublicSurface<{
+      const { telegramMessageActions } = await loadBundledPluginFacade<{
         telegramMessageActions: NonNullable<ChannelPlugin["actions"]>;
       }>({ pluginId: "telegram", artifactBasename: "runtime-api.js" });
       const { dispatchChannelMessageAction } = await vi.importActual<
